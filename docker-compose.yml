@@ -1,0 +1,22 @@
+services:
+  rrweb:
+    build:
+      context: ./web
+    env_file:
+      - ./web/.env.example
+    ports:
+      - 8000:8000
+
+  worker:
+    build:
+      context: ./worker
+    env_file:
+      - ./worker/.env.example
+
+  rrtext:
+    build:
+      context: ./renderers/text
+
+  rrwasm:
+    build:
+      context: ./renderers/wasm
