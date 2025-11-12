@@ -6,13 +6,17 @@ use axum::{
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use futures::stream::Stream;
 use serde::Deserialize;
-use std::{convert::Infallible, time::{SystemTime, UNIX_EPOCH, Duration}};
+use std::{sync::Arc, convert::Infallible, time::{Duration}};
 use tokio_stream::StreamExt;
-use wasmer::{imports, Instance, Module, Store, Value, Function};
+use wasmer::{Instance, Module, Store, Value};
+use wasmer_wasix::{PluggableRuntime, WasiEnv};
 
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+
+    println!("WASM renderer starting on port 80 /render");
+
     let app = Router::new().route("/render", post(render));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:80").await.unwrap();
@@ -38,17 +42,18 @@ impl WasmRunner {
     fn new_from_wasm(payload: &str) -> anyhow::Result<WasmRunner> {
         let mut store = Store::default();
         let module = Module::new(&store, payload)?;
-        let mytimefunc = || SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards")
-            .as_secs();
 
-        let import_object = imports! {
-            "env" => {
-                "unixtime" => Function::new_typed(&mut store, mytimefunc),
-            }
-        };
-        let instance = Instance::new(&mut store, &module, &import_object)?;
+        let runtime = Arc::new(PluggableRuntime::new(Arc::new(
+            wasmer_wasix::runtime::task_manager::tokio::TokioTaskManager::new(
+                tokio::runtime::Handle::current()
+            ),
+        )));
+
+        let (instance, mut wasi_env) = WasiEnv::builder("renderer")
+            .runtime(runtime)
+            .instantiate(module, &mut store)?;
+
+        wasi_env.initialize(&mut store, instance.clone())?;
 
         Ok(WasmRunner {
             store,
